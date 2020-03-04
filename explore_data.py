@@ -26,15 +26,28 @@ def extract_label_csvs_to_df(csv_list):
 		all_labels = all_labels.append(data, ignore_index=True)
 	return all_labels
 
-
-def analyze_labels(df, output_base):
-	# How many scans do we have per person?
+def plot_number_scans_per_patient(df, output_file):
 	scans_per_person = df.groupby('subj_id').scan_num.agg(['nunique'])
 	scans_per_person.hist()
 	plt.ylabel("Number of Patients")
 	plt.xlabel("Number of Scans")
 	plt.title("Number of Scans per Patient")
-	plt.savefig(os.path.join(output_base, 'scans_per_person.jpg'))
+	plt.savefig(output_file)
+
+def plot_number_images_per_patient(df, output_file):
+	images_per_person = df.groupby('subj_id').image_num.agg(['count'])
+
+	images_per_person.hist()
+	plt.ylabel("Number of Patients")
+	plt.xlabel("Number of Images")
+	plt.title("Number of Images per Patient")
+	plt.savefig(output_file)
+
+
+def analyze_labels(df, output_base):
+	# How many scans/images do we have per person?
+	plot_number_scans_per_patient(df, os.path.join(output_base, 'scans_per_person_all.jpg'))
+	plot_number_images_per_patient(df, os.path.join(output_base, 'images_per_person_all.jpg'))
 
 	# How many images have view_labels?
 	view_labels = df['view_label'].value_counts()
@@ -45,6 +58,10 @@ def analyze_labels(df, output_base):
 	at_least_one_target_missing_view = least_one_target[(least_one_target.view_label == "Missing") | (least_one_target.view_label == "Other")]
 	scan_counts = at_least_one_target_missing_view.groupby('subj_id').scan_num.agg(['nunique']).sum()
 	least_one_target_scan_counts = least_one_target.groupby('subj_id').scan_num.agg(['nunique'])
+
+	# How many scans/images do we have per person (with targets)?
+	plot_number_scans_per_patient(least_one_target, os.path.join(output_base, 'scans_per_person_with_target.jpg'))
+	plot_number_images_per_patient(least_one_target, os.path.join(output_base, 'images_per_person_with_target.jpg'))
 
 	print("="*100)
 	print(f"There are {len(least_one_target)} images from {least_one_target_scan_counts['nunique'].sum()} scans from {least_one_target.subj_id.nunique()} patients that have at least one target label")
@@ -60,6 +77,11 @@ def analyze_labels(df, output_base):
 	# How images have at least one label?
 	labelled_with_at_least_one_target = labelled_view_df[(labelled_view_df.function_label != "Missing") | (labelled_view_df.reflux_label != "Missing") | (labelled_view_df.surgery_label != "Missing")]
 	scan_counts = labelled_with_at_least_one_target.groupby('subj_id').scan_num.agg(['nunique']).sum()
+
+	# How many scans/images do we have per person (with labels)?
+	plot_number_scans_per_patient(labelled_with_at_least_one_target, os.path.join(output_base, 'scans_per_person_with_target_and_view.jpg'))
+	plot_number_images_per_patient(labelled_with_at_least_one_target, os.path.join(output_base, 'images_per_person_with_target_and_view.jpg'))
+
 	print("="*100)
 	print(f"Of the {len(labelled_view_df)} images that have a view label, {len(labelled_with_at_least_one_target)} have at least one target label.")
 	print(f"Therefore, we have images with a view label and at least one target label for {scan_counts['nunique']} scans from {labelled_with_at_least_one_target.subj_id.nunique()} patients.")
@@ -77,6 +99,15 @@ def analyze_labels(df, output_base):
 	view_labelled_with_ref_and_surg = labelled_view_df[(labelled_view_df.reflux_label != "Missing") & (labelled_view_df.surgery_label != "Missing")]
 	view_labelled_with_all_three_labels = labelled_view_df[(labelled_view_df.function_label != "Missing") & (labelled_view_df.reflux_label != "Missing") & (labelled_view_df.surgery_label != "Missing")]
 	print(f"Of the {len(view_labelled_with_ref_and_surg)} images that have both reflux and surgery labels, {len(view_labelled_with_all_three_labels)} also have a function label.")
+
+
+	# Count how many images are from each machine
+	machine_labels = df['image_manu'].value_counts()
+	machine_labels.to_csv(os.path.join(output_base, 'all_machine_labels.csv'))
+
+
+	machine_labels_with_targets = least_one_target['image_manu'].value_counts()
+	machine_labels_with_targets.to_csv(os.path.join(output_base, 'all_machine_labels_for_targets.csv'))
 
 
 def run_analysis(root_dir):
