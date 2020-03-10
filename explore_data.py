@@ -49,6 +49,10 @@ def analyze_labels(df, output_base):
 	plot_number_scans_per_patient(df, os.path.join(output_base, 'scans_per_person_all.jpg'))
 	plot_number_images_per_patient(df, os.path.join(output_base, 'images_per_person_all.jpg'))
 
+
+	scan_counts_all = df.groupby('subj_id').scan_num.agg(['nunique']).sum()
+	print(f"There are a total of {len(df)} images, representing {scan_counts_all['nunique'].sum()} scans from {df.subj_id.nunique()} patients.")
+
 	# How many images have view_labels?
 	view_labels = df['view_label'].value_counts()
 	view_labels.to_csv(os.path.join(output_base, 'view_labels.csv'))
