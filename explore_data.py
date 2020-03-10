@@ -11,7 +11,7 @@ def extract_label_csvs_to_df(csv_list):
 	'''
 	all_labels = pd.DataFrame()
 
-	header_names = ['num_in_seq', 'function_label', 'image_ids', 'image_manu', 'reflux_label', 'surgery_label', 'view_label']
+	header_names = ['num_in_seq', 'function_label', 'image_acq_date', 'image_acq_time', 'image_ids', 'image_manu', 'reflux_label', 'surgery_label', 'view_label']
 	for csv_path in csv_list:
 		data = pd.read_csv(csv_path)
 		data.columns = header_names
