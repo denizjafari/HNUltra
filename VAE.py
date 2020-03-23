@@ -1,8 +1,3 @@
-
-# coding: utf-8
-
-# In[1]:
-
 from __future__ import print_function
 import pandas as pd
 import numpy as np
@@ -20,11 +15,6 @@ from PIL import Image
 import argparse
 
 
-
-
-# In[2]:
-
-
 parser = argparse.ArgumentParser(description='VAE MNIST Example')
 parser.add_argument('--batch-size', type=int, default=128, metavar='N',
                     help='input batch size for training (default: 128)')
@@ -36,6 +26,10 @@ parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                     help='how many batches to wait before logging training status')
+parser.add_argument('--h-size', type=int, default=400, metavar='N',
+                    help='size of the hidden layer')
+parser.add_argument('--latent-size', type=int, default=20, metavar='N',
+                    help='size of the hidden layer')
 args = parser.parse_args()
 
 
@@ -48,9 +42,6 @@ data_dir = "/home/navidkorhani/Documents/HNProject/all_label_img/"
 # read target df
 csv_path = os.path.join(root_dir, "all_splits_100000.csv")
 data_df = pd.read_csv(csv_path, usecols=['image_ids', 'view_train'])
-
-
-# In[4]:
 
 
 train_df = data_df[data_df.view_train != 0]
@@ -68,9 +59,10 @@ for ind, row in test_df.iterrows():
 
 partition = {'train':train_ids, 'test':test_ids}
 
-
-# In[5]:
-
+results_sub_dir = 'h{0}_l{1}_e{2}'.format(args.h_size, args.latent_size, args.epochs)
+output_dir = os.path.join('./results', results_sub_dir)
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
 
 class Dataset(data.Dataset):
   'Characterizes a dataset for PyTorch'
@@ -94,8 +86,6 @@ class Dataset(data.Dataset):
 
         return image
 
-
-# In[6]:
 
 
 args.cuda= not args.no_cuda and torch.cuda.is_available()
@@ -132,12 +122,14 @@ test_loader = data.DataLoader(test_set, **params)
 class VAE(nn.Module):
     def __init__(self):
         super(VAE, self).__init__()
-
-        self.fc1 = nn.Linear(65536, 400)
-        self.fc21 = nn.Linear(400, 40)
-        self.fc22 = nn.Linear(400, 40)
-        self.fc3 = nn.Linear(40, 400)
-        self.fc4 = nn.Linear(400, 65536)
+        
+        hidden_dim = args.h_size
+        latent_dim = args.latent_size
+        self.fc1 = nn.Linear(65536, hidden_dim)
+        self.fc21 = nn.Linear(hidden_dim, latent_dim)
+        self.fc22 = nn.Linear(hidden_dim, latent_dim)
+        self.fc3 = nn.Linear(latent_dim, hidden_dim)
+        self.fc4 = nn.Linear(hidden_dim, 65536)
 
     def encode(self, x):
         h1 = F.relu(self.fc1(x))
@@ -163,6 +155,7 @@ class VAE(nn.Module):
 model = VAE().to(device)
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
+loss_array = np.array()
 
 # Reconstruction + KL divergence losses summed over all elements and batch
 def loss_function(recon_x, x, mu, logvar):
@@ -194,10 +187,11 @@ def train(epoch):
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                 100. * batch_idx / len(train_loader),
                 loss.item() / len(data)))
+            loss_array = np.append(loss_array, loss.item() / len(data))
 
     print('====> Epoch: {} Average loss: {:.4f}'.format(
           epoch, train_loss / len(train_loader.dataset)))
-    PATH = './vae_model.pt'
+    PATH = os.path.join(output_dir, 'vae_model.pt')
     torch.save(model.state_dict(), PATH)
 
 
@@ -214,13 +208,11 @@ def test(epoch):
                 comparison = torch.cat([data[:n],
                                       recon_batch.view(args.batch_size, 1, 256, 256)[:n]])
                 save_image(comparison.cpu(),
-                         'results/reconstruction_' + str(epoch) + '.png', nrow=n)
+                         output_dir+'/reconstruction_' + str(epoch) + '.png', nrow=n)
 
     test_loss /= len(test_loader.dataset)
     print('====> Test set loss: {:.4f}'.format(test_loss))
 
-
-# In[8]:
 
 
 if __name__ == "__main__":
@@ -228,8 +220,21 @@ if __name__ == "__main__":
         train(epoch)
         test(epoch)
         with torch.no_grad():
-            sample = torch.randn(64, 40).to(device)
+            sample = torch.randn(64, args.latent_size).to(device)
             sample = model.decode(sample).cpu()
             save_image(sample.view(64, 1, 256, 256),
-                       'results/sample_' + str(epoch) + '.png')
+                       output_dir+'/sample_' + str(epoch) + '.png')
+
+    plt.plot(loss_array)
+    plt.xlabel('batch_number')
+    plt.ylabel('loss')
+    plt.savefig(output_dir+'/loss_plot.fig')
+
+    plt.clf()
+
+    plt.plot(np.log(loss_array))
+    plt.xlabel('batch_number')
+    plt.ylabel('log loss')
+    plt.savefig(output_dir+'/log_loss_plot.fig')
+    
 
