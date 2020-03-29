@@ -13,11 +13,12 @@ from torchvision.utils import save_image
 import os
 from PIL import Image
 import argparse
+import matplotlib.pyplot as plt
 
 
 parser = argparse.ArgumentParser(description='VAE MNIST Example')
-parser.add_argument('--batch-size', type=int, default=128, metavar='N',
-                    help='input batch size for training (default: 128)')
+parser.add_argument('--batch-size', type=int, default=32, metavar='N',
+                    help='input batch size for training (default: 32)')
 parser.add_argument('--epochs', type=int, default=10, metavar='N',
                     help='number of epochs to train (default: 10)')
 parser.add_argument('--no-cuda', action='store_true', default=False,
@@ -32,6 +33,7 @@ parser.add_argument('--latent-size', type=int, default=20, metavar='N',
                     help='size of the hidden layer')
 args = parser.parse_args()
 
+print(args)
 
 # root directory
 root_dir = "/home/andreasabo/Documents/HNProject/"
@@ -50,7 +52,7 @@ test_df = data_df[data_df.view_train == 0]
 print("# of images in train = {}, # of images in test = {}".format(len(train_df), len(test_df)))
 train_ids = []
 test_ids = []
-
+least_error = -1
 for ind, row in train_df.iterrows():
     train_ids.append(row['image_ids'])
 
@@ -92,7 +94,7 @@ args.cuda= not args.no_cuda and torch.cuda.is_available()
 
 torch.manual_seed(args.seed)
 
-device = torch.device("cuda:1" if args.cuda else "cpu")
+device = torch.device("cuda" if args.cuda else "cpu")
 
 print("device is", device)
 
@@ -107,6 +109,7 @@ if args.cuda:
     params['num_workers']=1
     params['pin_memory']=True
 
+print(params)
 
 # Data Loader
 training_set = Dataset(partition['train'])
@@ -141,9 +144,7 @@ class VAE(nn.Module):
         return mu + eps*std
 
     def decode(self, z):
-        #print("z.size() =", z.size())
         h3 = F.relu(self.fc3(z))
-        #print("h3.size() =", h3.size())
         return torch.sigmoid(self.fc4(h3))
 
     def forward(self, x):
@@ -153,49 +154,89 @@ class VAE(nn.Module):
 
 
 model = VAE().to(device)
-optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
-loss_array = np.array()
+optimizer = optim.SGD(model.parameters(), momentum=0.9, lr=1e-4)
+optimizer = optim.Adam(model.parameters(), lr=1e-4)
+
+batches_loss_array = np.array([])
+epochs_loss_array = np.array([])
+test_loss_array = np.array([])
 
 # Reconstruction + KL divergence losses summed over all elements and batch
 def loss_function(recon_x, x, mu, logvar):
-    BCE = F.binary_cross_entropy(recon_x, x.view(-1, 65536), reduction='sum')
 
+    try:    
+        BCE = F.binary_cross_entropy(recon_x, x.view(-1, 65536), reduction='sum')
+        #BCE = F.mse_loss(recon_x, x.view(-1, 65536), reduction='sum')
+    except:
+        print("shape is:", recon_x.shape, x.shape)
+        #np.save('fail_recon_x.npy', recon_x.detach().cpu().numpy())
+        #np.save('fail_x.npy', x.cpu().numpy()) 
+        raise Exception("We got here")
     # see Appendix B from VAE paper:
     # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
     # https://arxiv.org/abs/1312.6114
     # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) 
 
-    return BCE + KLD
+    return (BCE + KLD) / len(x)
 
 
 def train(epoch):
+    global batches_loss_array
+    global epochs_loss_array
+    global least_error
     model.train()
     train_loss = 0
     for batch_idx, data in enumerate(train_loader):
-        #print("data.size()=", data.size())
+        #print('next batch')
         data = data.to(device)
         optimizer.zero_grad()
         recon_batch, mu, logvar = model(data)
+        
+        if torch.isnan(recon_batch).any().item():
+            print("got a nan array")
+            print(recon_batch)
+            print(mu)
+            print(logvar)
+            raise Exception('nan value tensor')
+            
+            
+        np.save('fail_recon_x.npy', recon_batch.detach().cpu().numpy())
+        np.save('fail_x.npy', data.cpu().numpy())
+        
         loss = loss_function(recon_batch, data, mu, logvar)
-        loss.backward()
         train_loss += loss.item()
+        loss.backward()
+        
+        #model_params = filter(lambda p: p.requires_grad, model.parameters())
+        #grad_vector = np.concatenate([p.grad.cpu().numpy().flatten() for p in model_params])
+
         optimizer.step()
         if batch_idx % args.log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.2f} '.format(
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                 100. * batch_idx / len(train_loader),
-                loss.item() / len(data)))
-            loss_array = np.append(loss_array, loss.item() / len(data))
-
-    print('====> Epoch: {} Average loss: {:.4f}'.format(
-          epoch, train_loss / len(train_loader.dataset)))
-    PATH = os.path.join(output_dir, 'vae_model.pt')
-    torch.save(model.state_dict(), PATH)
+                loss.item()))
+            batches_loss_array = np.append(batches_loss_array,loss.item())
+            
+    avg_train_loss = train_loss / len(train_loader.dataset)
+    
+    print('====> Epoch: {} Average Training loss: {:.2f}'.format(
+          epoch, avg_train_loss))
+    epochs_loss_array = np.append(epochs_loss_array, avg_train_loss)
+    
+    if least_error==-1 or least_error>avg_train_loss:
+        PATH = os.path.join(output_dir, 'vae_model.pt')
+    
+        torch.save(model.state_dict(), PATH)
+        
+        least_error = avg_train_loss
 
 
 def test(epoch):
+
+    global test_loss_array
     model.eval()
     test_loss = 0
     with torch.no_grad():
@@ -212,10 +253,14 @@ def test(epoch):
 
     test_loss /= len(test_loader.dataset)
     print('====> Test set loss: {:.4f}'.format(test_loss))
+    test_loss_array = np.append(test_loss_array, test_loss)
 
 
 
 if __name__ == "__main__":
+    model_params = filter(lambda p: p.requires_grad, model.parameters())
+    params_count = sum([np.prod(p.size()) for p in model_params])
+    print("total number of params = ", params_count)
     for epoch in range(1, args.epochs + 1):
         train(epoch)
         test(epoch)
@@ -225,16 +270,32 @@ if __name__ == "__main__":
             save_image(sample.view(64, 1, 256, 256),
                        output_dir+'/sample_' + str(epoch) + '.png')
 
-    plt.plot(loss_array)
+    plt.plot(batches_loss_array)
     plt.xlabel('batch_number')
     plt.ylabel('loss')
-    plt.savefig(output_dir+'/loss_plot.fig')
+    plt.savefig(output_dir+'/batches_loss_plot.png')
 
     plt.clf()
 
-    plt.plot(np.log(loss_array))
+    plt.plot(np.log(batches_loss_array))
     plt.xlabel('batch_number')
     plt.ylabel('log loss')
-    plt.savefig(output_dir+'/log_loss_plot.fig')
+    plt.savefig(output_dir+'/batches_log_loss_plot.png')
     
+    plt.clf()
 
+    plt.plot(np.log(epochs_loss_array))
+    plt.xlabel('epochs_number')
+    plt.ylabel('log loss')
+    plt.savefig(output_dir+'/epochs_log_loss_plot.png')
+    
+    plt.clf()
+
+    plt.plot(np.log(test_loss_array))
+    plt.xlabel('epochs_number')
+    plt.ylabel('test log loss')
+    plt.savefig(output_dir+'/test_log_loss_plot.png')
+    
+    np.save(output_dir+'batch_loss_array.npy', batches_loss_array)
+    np.save(output_dir+'epoch_loss_array.npy', epochs_loss_array)
+    np.save(output_dir+'test_loss_array.npy', test_loss_array)
