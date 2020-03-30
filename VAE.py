@@ -296,6 +296,6 @@ if __name__ == "__main__":
     plt.ylabel('test log loss')
     plt.savefig(output_dir+'/test_log_loss_plot.png')
     
-    np.save(output_dir+'batch_loss_array.npy', batches_loss_array)
-    np.save(output_dir+'epoch_loss_array.npy', epochs_loss_array)
-    np.save(output_dir+'test_loss_array.npy', test_loss_array)
+    np.save(output_dir+'/batch_loss_array.npy', batches_loss_array)
+    np.save(output_dir+'/epoch_loss_array.npy', epochs_loss_array)
+    np.save(output_dir+'/test_loss_array.npy', test_loss_array)
