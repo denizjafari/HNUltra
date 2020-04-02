@@ -22,19 +22,26 @@ import time
 import os
 from torch.utils import data
 import random
+import argparse
 
-
-# In[2]:
-
+parser = argparse.ArgumentParser(description='VAE MNIST Example')
+parser.add_argument('--batch-size', type=int, default=128, metavar='N',
+                    help='input batch size for training (default: 128)')
+parser.add_argument('--epochs', type=int, default=30, metavar='N',
+                    help='number of epochs to train (default: 30)')
+parser.add_argument('--no-cuda', action='store_true', default=False,
+                    help='enables CUDA training')
+parser.add_argument('--seed', type=int, default=1, metavar='S',
+                    help='random seed (default: 1)')
+parser.add_argument('--log-interval', type=int, default=10, metavar='N',
+                    help='how many batches to wait before logging training status')
+args = parser.parse_args()
+print(args)
 
 if torch.cuda.is_available():
     device = torch.device('cuda') 
 else:
     device = torch.device('cpu')
-
-
-# In[3]:
-
 
 # root directory
 andrea_dir = "/home/andreasabo/Documents/HNProject/"
@@ -45,16 +52,6 @@ data_dir = "/home/navidkorhani/Documents/HNProject/HNUltra/latent100_images/"
 # read target df
 csv_path = os.path.join(andrea_dir, "all_splits_1000000.csv")
 data_df = pd.read_csv(csv_path, usecols=['subj_id', 'image_ids', 'view_label', 'view_train'])
-
-
-# In[4]:
-
-
-batch_size = 128
-
-
-# In[5]:
-
 
 label_mapping = {'Other':0, 'Saggital_Right':1, 'Transverse_Right':2, 
                  'Saggital_Left':3, 'Transverse_Left':4, 'Bladder':5}
@@ -94,8 +91,6 @@ valid_ids = id_groups[train_portion:]['image_ids'].tolist()
 partition = {'train':train_ids, 'valid':valid_ids, 'test':test_ids}
 
 
-# In[6]:
-
 
 class Dataset(data.Dataset):
   'Characterizes a dataset for PyTorch'
@@ -129,7 +124,7 @@ class Dataset(data.Dataset):
 # Data augmentation and normalization for training
 
 # Parameters
-params = {'batch_size': batch_size,
+params = {'batch_size': args.batch_size,
           'shuffle': True,
           'num_workers': 6}
 
@@ -189,10 +184,13 @@ criterion = nn.CrossEntropyLoss()
 
 train_loss_array = np.array([])
 val_loss_array = np.array([])
-least_error = -1
-
 
 # In[16]:
+
+def compute_class_accuracy(y_true, y_pred):
+    cm = confusion_matrix(y_true, y_pred)
+    cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+    return cm.diagonal()
 
 
 def train(epoch):
@@ -219,17 +217,14 @@ def train(epoch):
         all_preds = np.append(all_preds, pred_label)
         all_targets  = np.append(all_targets, targets.detach().cpu().numpy())
         
-        if batch_idx % log_interval == 0:
+        if batch_idx % args.log_interval == 0:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.2f} '.format(
                 epoch, batch_idx * len(inputs), len(train_loader.dataset),
                 100. * batch_idx / len(train_loader),
                 loss.item()))
         
-        #print(len(train_loader.dataset), len(inputs))    
         avg_train_loss = train_loss / len(train_loader.dataset) * len(inputs)
     
-    #print('====> Epoch: {} Average Training loss: {:.2f}'.format(
-    #      epoch, avg_train_loss))
     
     train_loss_array = np.append(train_loss_array, avg_train_loss)
 
@@ -265,16 +260,10 @@ def evaluation():
         
     val_loss_array = np.append(val_loss_array, avg_val_loss)
     
-    if least_error==-1 or least_error>avg_val_loss:
-        PATH = os.path.join('saved models', 'vae_classifier.pt')
-    
-        torch.save(classifier_model.state_dict(), PATH)
-        
-        least_error = avg_val_loss
     
     acc = float(np.sum(all_targets == all_preds))/len(all_preds)
     
-    return avg_val_loss, acc
+    return avg_val_loss, acc, all_targets, all_preds
         
 def test():
 
@@ -283,6 +272,8 @@ def test():
     classifier_model.eval()
     test_loss = 0
     
+    all_targets = np.array([])
+    all_preds = np.array([])
     with torch.no_grad():
         for inputs, targets in test_loader:
             inputs, targets = inputs.to(device), targets.to(device)
@@ -291,28 +282,50 @@ def test():
             
             test_loss += criterion(preds, targets).item()
 
+            prob_pred = preds.detach().cpu().numpy() #128 x 6
+            pred_label = np.argmax(prob_pred, axis=1)
+            
+            all_preds = np.append(all_preds, pred_label)
+            all_targets  = np.append(all_targets, targets.detach().cpu().numpy())
+
+
     test_loss /= len(test_loader.dataset) * len(inputs)
     
+    acc = float(np.sum(all_targets == all_preds))/len(all_preds)
     #test_loss_array = np.append(test_loss_array, test_loss)
     
-    return test_loss
+    return test_loss, acc, all_targets, all_preds
 
 
 # In[17]:
 
+if __name__ == "__main__":
+    least_score=-1
+    for epoch in range(epochs):
 
-for epoch in range(epochs):
-    train_loss, train_acc = train(epoch)
-    val_loss, val_acc = evaluation()
-    
-    print('====> Epoch: {}  Train loss: {:.2f}   Train Accuracy: {:.2f}%   |  Validation loss: {:.2}   Validation Accuracy: {:.2f}%'.format(
-              epoch, train_loss, train_acc, val_loss, val_acc))
-    
-test_loss = test()
+        train_loss, train_acc = train(epoch)
+        val_loss, val_acc, val_targets, val_preds = evaluation()
+        
+        if least_error==-1 or least_error>_val_loss:
+            PATH = os.path.join('saved models', 'vae_classifier.pt')
+        
+            torch.save(classifier_model.state_dict(), PATH)
+            least_error = val_loss
 
-print("Test Loss: {}".format(test_loss))
+        print('====> Epoch: {}  Train loss: {:.2f}   Train Accuracy: {:.2f}%   |  Validation loss: {:.2}   Validation Accuracy: {:.2f}%'.format(
+                  epoch, train_loss, train_acc*100, val_loss, val_acc*100))
+        
+    class_acc = compute_class_accuracy(val_targets, val_preds)
+    print("Validation class accuracy:")
+    print(class_acc)
 
-np.save('vae_class_train.npy', train_loss_array)
-np.save('vae_class_val.npy', val_loss_array)
+    test_loss, test_acc, test_targets, test_preds= test()
+    class_acc = compute_class_accuracy(test_targets, test_preds)
+    print("Test class accuracy:")
+    print(class_acc)
+
+    print("Test Loss: {:.2f}   Test Accuracy: {:.2f}%".format(test_loss, test_acc*100))
+
+    np.savez('vae_classification_loss.npz', train_loss=train_loss_array, val_loss=val_loss_array)
 
 
