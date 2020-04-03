@@ -1,9 +1,3 @@
-
-# coding: utf-8
-
-# In[1]:
-
-
 import pandas as pd
 import numpy as np
 import torch
@@ -146,31 +140,20 @@ class DeepClassifier(nn.Module):
     def __init__(self):
         super(DeepClassifier, self).__init__()
         
-        self.fc1 = nn.Linear(100, 100)
-        self.fc2 = nn.Linear(100, 50)
-        self.fc3 = nn.Linear(50, 6)
+        self.fc1 = nn.Linear(100, 800)
+        self.fc2 = nn.Linear(800, 100)
+        self.fc3 = nn.Linear(100, 6)
+        #self.fc4 = nn.Linear(50, 6)
         self.softmax = nn.Softmax(dim=1)
     
     
     def forward(self, z):
-        h1 = F.relu(self.fc1(z))
-        h2 = F.relu(self.fc2(h1))
-        out = self.softmax(self.fc3(h2))
+        out = F.relu(self.fc1(z))
+        out = F.relu(self.fc2(out))
+        #out = F.relu(self.fc3(out))
+        out = self.softmax(self.fc3(out))
         
         return out
-    
-
-
-# In[14]:
-
-
-#hyperparams
-
-epochs = 30
-
-val_check_interval = 40
-
-log_interval = 10
 
 
 # In[15]:
@@ -178,7 +161,7 @@ log_interval = 10
 
 classifier_model = DeepClassifier().to(device)
 
-optimizer = optim.Adam(classifier_model.parameters(), lr=1e-4)
+optimizer = optim.Adam(classifier_model.parameters(), weight_decay=1e-4, lr=1e-4)
 
 criterion = nn.CrossEntropyLoss()
 
@@ -187,6 +170,17 @@ val_loss_array = np.array([])
 
 # In[16]:
 
+def l2_loss():
+    reg_coeff = 0.1
+    l2_reg = None
+    for p in classifier_model.parameters():
+        if l2_reg is None:
+            l2_reg = reg_coeff*p.norm(2)
+        else:
+            l2_reg = l2_reg +reg_coeff*p.norm(2)
+    
+    return l2_reg
+        
 def compute_class_accuracy(y_true, y_pred):
     cm = confusion_matrix(y_true, y_pred)
     cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
@@ -205,7 +199,7 @@ def train(epoch):
         optimizer.zero_grad()
         preds = classifier_model(inputs)
         
-        loss = criterion(preds, targets)
+        loss = criterion(preds, targets)# + l2_loss()
         train_loss += loss.item()
         loss.backward()
         
@@ -300,13 +294,13 @@ def test():
 # In[17]:
 
 if __name__ == "__main__":
-    least_score=-1
-    for epoch in range(epochs):
+    least_error=-1
+    for epoch in range(args.epochs):
 
         train_loss, train_acc = train(epoch)
         val_loss, val_acc, val_targets, val_preds = evaluation()
         
-        if least_error==-1 or least_error>_val_loss:
+        if least_error==-1 or least_error>val_loss:
             PATH = os.path.join('saved models', 'vae_classifier.pt')
         
             torch.save(classifier_model.state_dict(), PATH)
