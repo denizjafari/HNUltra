@@ -18,6 +18,10 @@ from torch.utils import data
 import random
 import argparse
 
+import wandb
+wandb.init(project='hnultra')
+
+
 parser = argparse.ArgumentParser(description='VAE MNIST Example')
 parser.add_argument('--batch-size', type=int, default=128, metavar='N',
                     help='input batch size for training (default: 128)')
@@ -160,6 +164,8 @@ class DeepClassifier(nn.Module):
 
 
 classifier_model = DeepClassifier().to(device)
+
+wandb.watch(model)
 
 optimizer = optim.Adam(classifier_model.parameters(), weight_decay=1e-4, lr=1e-4)
 
