@@ -21,6 +21,8 @@ import argparse
 import wandb
 wandb.init(project='hnultra')
 
+wandb_username = 'nkorhani'
+local_username = 'nkorhani'
 
 parser = argparse.ArgumentParser(description='VAE MNIST Example')
 parser.add_argument('--batch-size', type=int, default=128, metavar='N',
@@ -33,7 +35,23 @@ parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                     help='how many batches to wait before logging training status')
+
+parser.add_argument('--layers-dim', nargs='+', type=int)
+
+parser.add_argument('--input-dim', type=int, default=100, 
+                    help='size of vae latent dimension')
+
 args = parser.parse_args()
+
+configs_dict = {'num_epochs':args.epochs, 'num_of_layers':args.layers_num,
+        'layers_dim':args.layers_dim, 'vae_latent_dim':args.input_dim}
+wandb.config.update(configs_dict)
+
+run_id = 'vae_view_'+" ".join(list(map(str, args.layers_dim)))
+now = datetime.now()
+date_time = now.strftime("%d-%m-%Y.%H:%M:%S")
+wandb.init(project='hnultra', entity=wandb_username, name=run_id)
+
 print(args)
 
 if torch.cuda.is_available():
@@ -109,24 +127,17 @@ class Dataset(data.Dataset):
         # Load data and get label
         path = data_dir + ID + '.npy'
         z = torch.tensor(np.load(path)).squeeze()
-
-
         y = torch.tensor(self.labels[ID], dtype=torch.long)
 
         return z, y
 
-
-# In[7]:
-
-
-# Data augmentation and normalization for training
 
 # Parameters
 params = {'batch_size': args.batch_size,
           'shuffle': True,
           'num_workers': 6}
 
-# Generators
+# Datasets and Generators
 training_set = Dataset(partition['train'], labels)
 train_loader = DataLoader(training_set, **params)
 
@@ -136,34 +147,35 @@ validation_loader = data.DataLoader(validation_set, **params)
 test_set = Dataset(partition['valid'], labels)
 test_loader = data.DataLoader(test_set, **params)
 
-
-# In[13]:
-
-
 class DeepClassifier(nn.Module):
-    def __init__(self):
+    def __init__(self, input_dim=100, layers_dim = [200]):
         super(DeepClassifier, self).__init__()
         
-        self.fc1 = nn.Linear(100, 800)
-        self.fc2 = nn.Linear(800, 100)
-        self.fc3 = nn.Linear(100, 6)
-        #self.fc4 = nn.Linear(50, 6)
+        self.input_dim = input_dim
+        self.layers_dim = layers_dim.copy()
+
+        self.fcns = []
+        current_dim = input_dim
+        for i in len(self.layers_dim):
+            self.fcns.append(nn.Linear(current_dim, layers_dim[i]))
+            current_dim = layers_dim[i]
+
+        self.fcns.append(nn.Linear(current_dim, 6))
         self.softmax = nn.Softmax(dim=1)
     
     
-    def forward(self, z):
-        out = F.relu(self.fc1(z))
-        out = F.relu(self.fc2(out))
-        #out = F.relu(self.fc3(out))
+    def forward(self, x):
+
+        out = F.relu(self.fcns[0](x))
+
+        for i in range(1, len(self.layers_dim)):
+            out = F.relu(self.fcns[i](out))
+
         out = self.softmax(self.fc3(out))
         
         return out
 
-
-# In[15]:
-
-
-classifier_model = DeepClassifier().to(device)
+classifier_model = DeepClassifier(input_dim=args.input_dim, layers_dim=args.layers_dim).to(device)
 
 wandb.watch(model)
 
@@ -171,8 +183,8 @@ optimizer = optim.Adam(classifier_model.parameters(), weight_decay=1e-4, lr=1e-4
 
 criterion = nn.CrossEntropyLoss()
 
-train_loss_array = np.array([])
-val_loss_array = np.array([])
+#train_loss_array = np.array([])
+#val_loss_array = np.array([])
 
 # In[16]:
 
@@ -194,7 +206,7 @@ def compute_class_accuracy(y_true, y_pred):
 
 
 def train(epoch):
-    global train_loss_array
+#    global train_loss_array
     
     classifier_model.train()
     train_loss = 0
@@ -226,15 +238,14 @@ def train(epoch):
         avg_train_loss = train_loss / len(train_loader.dataset) * len(inputs)
     
     
-    train_loss_array = np.append(train_loss_array, avg_train_loss)
+ #   train_loss_array = np.append(train_loss_array, avg_train_loss)
 
     acc = float(np.sum(all_targets == all_preds))/len(all_preds)
-    return avg_train_loss, acc
+    return avg_train_loss, acc, all_targets, all_preds
 
 
 def evaluation():
-    global least_error
-    global val_loss_array
+    #global val_loss_array
     
     all_targets = np.array([])
     all_preds = np.array([])
@@ -259,7 +270,6 @@ def evaluation():
         avg_val_loss = eval_loss / len(validation_loader.dataset) * len(inputs)
         
     val_loss_array = np.append(val_loss_array, avg_val_loss)
-    
     
     acc = float(np.sum(all_targets == all_preds))/len(all_preds)
     
@@ -296,9 +306,6 @@ def test():
     
     return test_loss, acc, all_targets, all_preds
 
-
-# In[17]:
-
 if __name__ == "__main__":
     least_error=-1
     for epoch in range(args.epochs):
@@ -314,6 +321,8 @@ if __name__ == "__main__":
 
         print('====> Epoch: {}  Train loss: {:.2f}   Train Accuracy: {:.2f}%   |  Validation loss: {:.2}   Validation Accuracy: {:.2f}%'.format(
                   epoch, train_loss, train_acc*100, val_loss, val_acc*100))
+
+        wandb.log({'epoch':epoch, 'train_loss':train_loss, 'val_loss':val_loss})
         
     class_acc = compute_class_accuracy(val_targets, val_preds)
     print("Validation class accuracy:")
@@ -326,6 +335,11 @@ if __name__ == "__main__":
 
     print("Test Loss: {:.2f}   Test Accuracy: {:.2f}%".format(test_loss, test_acc*100))
 
-    np.savez('vae_classification_loss.npz', train_loss=train_loss_array, val_loss=val_loss_array)
+
+    wandb.save(run_id+'.h5')
+
+    model.save(os.path.join(wandb.run.dir,run_id+'h5'))
+
+    
 
 
