@@ -19,7 +19,6 @@ import random
 import argparse
 
 import wandb
-wandb.init(project='hnultra')
 
 wandb_username = 'nkorhani'
 local_username = 'nkorhani'
@@ -43,17 +42,18 @@ parser.add_argument('--input-dim', type=int, default=100,
 
 args = parser.parse_args()
 
-configs_dict = {'num_epochs':args.epochs, 'num_of_layers':args.layers_num,
+configs_dict = {'num_epochs':args.epochs,
         'layers_dim':args.layers_dim, 'vae_latent_dim':args.input_dim}
-wandb.config.update(configs_dict)
 
 run_id = 'vae_view_'+" ".join(list(map(str, args.layers_dim)))
-now = datetime.now()
-date_time = now.strftime("%d-%m-%Y.%H:%M:%S")
+
 wandb.init(project='hnultra', entity=wandb_username, name=run_id)
+wandb.config.update(configs_dict)
 
 print(args)
 
+
+#raise Exception('my Error')
 if torch.cuda.is_available():
     device = torch.device('cuda') 
 else:
@@ -156,7 +156,7 @@ class DeepClassifier(nn.Module):
 
         self.fcns = []
         current_dim = input_dim
-        for i in len(self.layers_dim):
+        for i in range(len(self.layers_dim)):
             self.fcns.append(nn.Linear(current_dim, layers_dim[i]))
             current_dim = layers_dim[i]
 
@@ -177,7 +177,7 @@ class DeepClassifier(nn.Module):
 
 classifier_model = DeepClassifier(input_dim=args.input_dim, layers_dim=args.layers_dim).to(device)
 
-wandb.watch(model)
+wandb.watch(classifier_model)
 
 optimizer = optim.Adam(classifier_model.parameters(), weight_decay=1e-4, lr=1e-4)
 
