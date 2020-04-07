@@ -42,7 +42,7 @@ print(args)
 
 configs_dict = {'num_epochs':args.epochs,'layers_dim':args.layers_dim, 'vae_latent_dim':args.input_dim}
 
-run_id = 'vae_view_{}_input_dim_{}_layers_'.format(args.input_dim, len(args.layers_dim)) + "_".join(list(map(str, args.layers_dim)))
+run_id = 'input_dim_{}_layers_'.format(args.input_dim) + "_".join(list(map(str, args.layers_dim)))
 print("run_id =",run_id)
 
 wandb_username = 'nkorhani'
@@ -285,30 +285,33 @@ def test(model, criterion, test_loader):
 if __name__ == "__main__":
 
     test_loader = get_test_loader()
-    test_accuracies = np.array([])
+
+    all_test_acc = np.array([])
+    best_val_acc = np.array([])
+
+    outfile_name = os.path.join('vae_view_outputs', run_id+'_fold_'+str(fold)+'.json')
+    json_file = open(outfile_name, 'w')
+    output_dict = {}
+
     for fold in '01234':
         print('fold {}:'.format(fold))
        
-        outfile_name = run_id+'_fold_'+str(fold)+'output.txt'
-        f = open(outfile_name, 'a')
-        f.write('fold '+fold+'\n')
-
         run_name = 'fold_'+fold
         group_name=str(args.layers_dim)
         
         wandb.init(project='hnultra', entity='nkorhani', name=run_name, group=str(args.layers_dim), reinit=True)
-        #print(wandb.name)
         wandb.config.update(configs_dict)
 
         train_loader, val_loader = get_train_and_val_loaders(fold)
 
+        #initialize model
+        #define optimizer and loss criterion
         model = DeepClassifier(input_dim=args.input_dim, layers_dim=args.layers_dim).to(device)
         wandb.watch(model)
         optimizer = optim.Adam(model.parameters(), weight_decay=1e-4, lr=1e-4)
         criterion = nn.CrossEntropyLoss()
 
         least_error=-1
-
         val_loss_array = np.array([])
 
         for epoch in range(args.epochs):
@@ -318,20 +321,39 @@ if __name__ == "__main__":
             
             val_loss_array = np.append(val_loss_array, val_loss)
 
+            #Selecting and saving the best model so far
             if least_error==-1 or least_error>val_loss:
                 PATH = os.path.join('saved models', run_id+'.pt')
             
                 torch.save(model.state_dict(), PATH)
                 least_error = val_loss
 
+            #computing class accuracies
+
+            class_acc = {'train': compute_class_accuracy(train_targets, train_preds),
+                         'val':   compute_class_accuracy(val_targets, val_preds)
+                         }
+
+            for key in ['train', 'val']:
+                for i in range(6):
+                    wandb.log({'epoch':epoch, key+'_'+reverse_mapping[i]+'_accuracy':class_acc[key][i]})
+
             print('====> Epoch: {}  Train loss: {:.2f}   Train Accuracy: {:.2f}%   |  Validation loss: {:.2}   Validation Accuracy: {:.2f}%'.format(
                       epoch, train_loss, train_acc*100, val_loss, val_acc*100))
 
             wandb.log({'epoch':epoch, 'train_loss':train_loss})
 
-            precision_recall_fscore_support(train_targets, train_preds)
-            precision_recall_fscore_support(val_targets, val_preds)
+            train_precision, train_recall, train_fscore, train_support = precision_recall_fscore_support(train_targets, train_preds)
+            val_precision, val_recall, val_fscore, val_support = precision_recall_fscore_support(val_targets, val_preds)
 
+            prfs_dict = {'train_precision':train_precision, 'train_recall':train_recall, 'train_fscore':train_fscore, 'train_support':train_support
+                        'val_prediction':val_precision, 'val_recall':val_recall, 'val_fscore':val_fscore, 'val_support':val_support
+                         }   
+
+            for phase in ['train', 'val']:
+                for metric in ['precision', 'recall', 'fscore', 'support']:
+                    for i in range(6):
+                        wandb.log({'epoch':epoch, phase+'_'+metric+str(i):prfs_dict[phase+'_'+metric][i])
 
             if epoch >= 40 and val_loss_array[-1] >= min(val_loss_array[-20:-1]):
                 print('Early stopping')
@@ -342,34 +364,36 @@ if __name__ == "__main__":
         model.load_state_dict(torch.load(PATH))
 
         val_loss, val_acc, val_targets, val_preds = evaluation(model, criterion, val_loader)
+        best_val_acc = np.append(best_val_acc, val_acc)
+
         print('Best validation accuracy:', val_acc)
-        f.write('Best validation accuracy: {:.2f} ... best validation loss: {:.2f}\n'.format(val_acc, val_loss))
 
         class_acc = compute_class_accuracy(val_targets, val_preds)
         print("Validation class accuracy:")
         print(class_acc)
-
-        f.write('validation class accuracy:' + str(class_acc) + '\n')
 
         test_loss, test_acc, test_targets, test_preds= test(model, criterion, test_loader)
         class_acc = compute_class_accuracy(test_targets, test_preds)
         print("Test class accuracy:")
         print(class_acc)
 
-        f.write('test class accuracy:' + str(class_acc) + '\n')
-
 
         print("Test Loss: {:.2f}   Test Accuracy: {:.2f}%".format(test_loss, test_acc*100))
 
-        f.write("Test Loss: {:.2f}   Test Accuracy: {:.2f}%\n".format(test_loss, test_acc*100))
+        all_test_acc = np.append(all_test_acc, test_acc)
 
-        f.close()
+    
+    all_test_acc = np.array([])
+    best_val_acc = np.array([])
+
+    output_dict['all_test_acc'] = all_test_acc
+    output_dict['best_val_acc'] = best_val_acc
+    output_dict['avg_val_acc'] = np.mean(best_val_acc)
+    output_dict['avg_test_acc'] = np.mean(all_test_acc)
+    
+    json.dump(output_dict, f)
+    f.close()
 
 
     wandb.save(outfile_name)
-
-    #model.save(os.path.join(wandb.run.dir,run_id+'h5'))
-
-    
-
 
