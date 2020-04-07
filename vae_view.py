@@ -67,12 +67,12 @@ class Dataset(data.Dataset):
   def __getitem__(self, index):
         'Generates one sample of data'
         # Select sample
-        ID = self.list_IDs[index]
+        image_id = self.list_IDs[index]
 
         # Load data and get label
-        path = data_dir + ID + '.npy'
+        path = data_dir + image_id + '.npy'
         z = torch.tensor(np.load(path)).squeeze()
-        y = torch.tensor(self.labels[ID], dtype=torch.long)
+        y = torch.tensor(self.labels[index], dtype=torch.long)
 
         return z, y
 
@@ -101,13 +101,12 @@ def get_test_loader():
     test_df = data_df[data_df.view_train == 0]
 
     test_ids = []
-    test_labels = {}
+    test_labels = test_df['view_label'].to_list()
     for ind, row in test_df.iterrows():
         test_ids.append(row['image_ids'])
-        test_labels[row['image_ids']] = row['view_label']
 
     test_dataset = Dataset(test_ids, test_labels)
-    test_loader = data.DataLoader(test_set, **params)
+    test_loader = data.DataLoader(test_dataset, **params)
 
     return test_loader
         
@@ -154,7 +153,7 @@ class DeepClassifier(nn.Module):
             self.fc5 = nn.Linear(self.layers_dim[3], self.layers_dim[4])
 
 
-        self.fc_last.append(nn.Linear(self.layers_dim[-1], 6))
+        self.fc_last = nn.Linear(self.layers_dim[-1], 6)
         self.softmax = nn.Softmax(dim=1)
     
     
@@ -245,10 +244,8 @@ def evaluation(model, criterion, val_loader):
             all_preds = np.append(all_preds, pred_label)
             all_targets  = np.append(all_targets, targets.detach().cpu().numpy())
 
-        avg_val_loss = eval_loss / len(validation_loader.dataset) * len(inputs)
+        avg_val_loss = eval_loss / len(val_loader.dataset) * len(inputs)
         
-    val_loss_array = np.append(val_loss_array, avg_val_loss)
-    
     acc = float(np.sum(all_targets == all_preds))/len(all_preds)
     
     return avg_val_loss, acc, all_targets, all_preds
@@ -276,8 +273,9 @@ def test(model, criterion, test_loader):
             all_preds = np.append(all_preds, pred_label)
             all_targets  = np.append(all_targets, targets.detach().cpu().numpy())
 
-
-    test_loss /= len(test_loader.dataset) * len(inputs)
+    print("test_loss", test_loss)
+    test_loss = test_loss / len(test_loader.dataset) * len(inputs)
+    print("test_loss", test_loss)
     
     acc = float(np.sum(all_targets == all_preds))/len(all_preds)
     #test_loss_array = np.append(test_loss_array, test_loss)
@@ -287,12 +285,20 @@ def test(model, criterion, test_loader):
 if __name__ == "__main__":
 
     test_loader = get_test_loader()
-    for fold in range(5):
+    test_accuracies = np.array([])
+    for fold in '01234':
+        print('fold {}:'.format(fold))
        
-        f = open(run_id+'_fold_'+str(fold)+'output.txt', 'w')
+        outfile_name = run_id+'_fold_'+str(fold)+'output.txt'
+        f = open(outfile_name, 'a')
+        f.write('fold '+fold+'\n')
 
-        wandb.init(project='hnultra', name=run_id+'_fold_'+str(fold)
-        wandb.update(config_dict)
+        run_name = 'fold_'+fold
+        group_name=str(args.layers_dim)
+        
+        wandb.init(project='hnultra', entity='nkorhani', name=run_name, group=str(args.layers_dim), reinit=True)
+        #print(wandb.name)
+        wandb.config.update(configs_dict)
 
         train_loader, val_loader = get_train_and_val_loaders(fold)
 
@@ -321,7 +327,7 @@ if __name__ == "__main__":
             print('====> Epoch: {}  Train loss: {:.2f}   Train Accuracy: {:.2f}%   |  Validation loss: {:.2}   Validation Accuracy: {:.2f}%'.format(
                       epoch, train_loss, train_acc*100, val_loss, val_acc*100))
 
-            wandb.log({'train_loss':train_loss, 'val_loss':val_loss}, step=epoch)
+            wandb.log({'epoch':epoch, 'train_loss':train_loss})
 
             precision_recall_fscore_support(train_targets, train_preds)
             precision_recall_fscore_support(val_targets, val_preds)
@@ -336,8 +342,8 @@ if __name__ == "__main__":
         model.load_state_dict(torch.load(PATH))
 
         val_loss, val_acc, val_targets, val_preds = evaluation(model, criterion, val_loader)
-        print('Best validation accuracy:', val_acc}
-        f.write('Best validation accuracy: {.2f} ... best validation loss: {.2f}\n'.format(val_acc, val_loss)
+        print('Best validation accuracy:', val_acc)
+        f.write('Best validation accuracy: {:.2f} ... best validation loss: {:.2f}\n'.format(val_acc, val_loss))
 
         class_acc = compute_class_accuracy(val_targets, val_preds)
         print("Validation class accuracy:")
@@ -360,9 +366,9 @@ if __name__ == "__main__":
         f.close()
 
 
-    wandb.save(run_id+'.h5')
+    wandb.save(outfile_name)
 
-    model.save(os.path.join(wandb.run.dir,run_id+'h5'))
+    #model.save(os.path.join(wandb.run.dir,run_id+'h5'))
 
     
 
