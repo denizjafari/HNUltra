@@ -140,16 +140,16 @@ class DeepClassifier(nn.Module):
 
         self.fc1 = nn.Linear(input_dim, self.layers_dim[0])
 
-        if self.num_of_layers == 2:
+        if self.num_of_layers >= 2:
             self.fc2 = nn.Linear(self.layers_dim[0], self.layers_dim[1])
 
-        if self.num_of_layers == 3:
+        if self.num_of_layers >= 3:
             self.fc3 = nn.Linear(self.layers_dim[1], self.layers_dim[2])
 
-        if self.num_of_layers == 4:
+        if self.num_of_layers >= 4:
             self.fc4 = nn.Linear(self.layers_dim[2], self.layers_dim[3])
 
-        if self.num_of_layers == 5:
+        if self.num_of_layers >= 5:
             self.fc5 = nn.Linear(self.layers_dim[3], self.layers_dim[4])
 
 
@@ -161,17 +161,17 @@ class DeepClassifier(nn.Module):
 
         out = F.relu(self.fc1(x))
 
-        if self.num_of_layers == 2:
-            out = F.relu(self.fc1(x))
+        if self.num_of_layers >= 2:
+            out = F.relu(self.fc2(out))
 
-        if self.num_of_layers == 3:
-            out = F.relu(self.fc2(x))
+        if self.num_of_layers >= 3:
+            out = F.relu(self.fc3(out))
 
-        if self.num_of_layers == 4:
-            out = F.relu(self.fc3(x))
+        if self.num_of_layers >= 4:
+            out = F.relu(self.fc4(out))
 
-        if self.num_of_layers == 5:
-            out = F.relu(self.fc4(x))
+        if self.num_of_layers >= 5:
+            out = F.relu(self.fc5(out))
 
         out = self.softmax(self.fc_last(out))
         
@@ -291,8 +291,12 @@ if __name__ == "__main__":
     all_test_acc = np.array([])
     best_val_acc = np.array([])
 
-    outfile_name = os.path.join('vae_view_outputs', run_id+'_fold_'+str(fold)+'.json')
+    outfile_name = os.path.join('vae_view_outputs', run_id+'.json')
+    final_train_acc = np.array([])
     json_file = open(outfile_name, 'w')
+    test_f1_scores = np.array([])
+    val_f1_scores = np.array([])
+    train_f1_scores = np.array([])
     output_dict = {}
 
     for fold in '01234':
@@ -369,12 +373,15 @@ if __name__ == "__main__":
         train_f1 = f1_score(train_targets, train_preds, average='macro')
 
         print('train f1_score', train_f1)
+        train_f1_scores = np.append(train_f1_scores, train_f1)
+        final_train_acc = np.append(final_train_acc, train_acc)
 
         val_loss, val_acc, val_targets, val_preds = evaluation(model, criterion, val_loader)
         best_val_acc = np.append(best_val_acc, val_acc)
 
         val_f1 = f1_score(val_targets, val_preds, average='macro')
         print('validation f1_score', val_f1)
+        val_f1_scores = np.append(val_f1_scores, val_f1)
 
         print('Best validation accuracy:', val_acc)
 
@@ -387,25 +394,32 @@ if __name__ == "__main__":
         print("Test class accuracy:")
         print(class_acc)
 
+
         test_f1 = f1_score(test_targets, test_preds, average='macro')
         print('test f1_score', test_f1)
 
+        test_f1_scores = np.append(test_f1_scores, test_f1)
 
         print("Test Loss: {:.2f}   Test Accuracy: {:.2f}%".format(test_loss, test_acc*100))
 
         all_test_acc = np.append(all_test_acc, test_acc)
 
-   
-    all_test_acc = np.array([])
-    best_val_acc = np.array([])
+    print("Train f1_score: {} +/- {}".format(np.mean(train_f1_scores), np.std(train_f1_scores)))
+    print("Val f1_score: {} +/- {}".format(np.mean(val_f1_scores), np.std(val_f1_scores)))
+    print("Test f1_score: {} +/- {}".format(np.mean(test_f1_scores), np.std(test_f1_scores)))
 
-    output_dict['all_test_acc'] = all_test_acc
-    output_dict['best_val_acc'] = best_val_acc
+
+    print("Train Acc: {} +/- {}".format(np.mean(final_train_acc), np.std(final_train_acc)))
+    print("Val Acc: {} +/- {}".format(np.mean(best_val_acc), np.std(best_val_acc)))
+    print("Test Acc: {} +/- {}".format(np.mean(all_test_acc), np.std(all_test_acc)))
+
+#    output_dict['all_test_acc'] = all_test_acc
+#    output_dict['best_val_acc'] = best_val_acc
     output_dict['avg_val_acc'] = np.mean(best_val_acc)
     output_dict['avg_test_acc'] = np.mean(all_test_acc)
     
-    json.dump(output_dict, f)
-    f.close()
+    json.dump(output_dict, json_file)
+    json_file.close()
 
 
     wandb.save(outfile_name)
