@@ -183,7 +183,7 @@ def compute_class_accuracy(y_true, y_pred):
     return cm.diagonal()
 
 
-def train(epoch, model, optimizer, criterion, train_loader):
+def train(epoch, model, optimizer, criterion, train_loader, should_train=True):
     
     model.train()
     train_loss = 0
@@ -196,9 +196,11 @@ def train(epoch, model, optimizer, criterion, train_loader):
         
         loss = criterion(preds, targets)# + l2_loss()
         train_loss += loss.item()
-        loss.backward()
+
+        if should_train:
+            loss.backward()
         
-        optimizer.step()
+            optimizer.step()
         
         prob_pred = preds.detach().cpu().numpy() #128 x 6
         pred_label = np.argmax(prob_pred, axis=1)
@@ -342,7 +344,7 @@ if __name__ == "__main__":
                       epoch, train_loss, train_acc*100, val_loss, val_acc*100))
 
             wandb.log({'epoch':epoch, 'train_loss':train_loss})
-
+            '''
             train_precision, train_recall, train_fscore, train_support = precision_recall_fscore_support(train_targets, train_preds)
             val_precision, val_recall, val_fscore, val_support = precision_recall_fscore_support(val_targets, val_preds)
 
@@ -354,7 +356,7 @@ if __name__ == "__main__":
                 for metric in ['precision', 'recall', 'fscore', 'support']:
                     for i in range(6):
                         wandb.log({'epoch':epoch, phase+'_'+metric+str(i):prfs_dict[phase+'_'+metric][i])
-
+            '''
             if epoch >= 40 and val_loss_array[-1] >= min(val_loss_array[-20:-1]):
                 print('Early stopping')
                 break
@@ -363,8 +365,16 @@ if __name__ == "__main__":
         PATH = os.path.join('saved models', run_id+'.pt')
         model.load_state_dict(torch.load(PATH))
 
+        train_loss, train_acc, train_targets, train_preds = train(epoch, model, optimizer, criterion, train_loader, False)
+        train_f1 = f1_score(train_targets, train_preds, average='macro')
+
+        print('train f1_score', train_f1)
+
         val_loss, val_acc, val_targets, val_preds = evaluation(model, criterion, val_loader)
         best_val_acc = np.append(best_val_acc, val_acc)
+
+        val_f1 = f1_score(val_targets, val_preds, average='macro')
+        print('validation f1_score', val_f1)
 
         print('Best validation accuracy:', val_acc)
 
@@ -377,12 +387,15 @@ if __name__ == "__main__":
         print("Test class accuracy:")
         print(class_acc)
 
+        test_f1 = f1_score(test_targets, test_preds, average='macro')
+        print('test f1_score', test_f1)
+
 
         print("Test Loss: {:.2f}   Test Accuracy: {:.2f}%".format(test_loss, test_acc*100))
 
         all_test_acc = np.append(all_test_acc, test_acc)
 
-    
+   
     all_test_acc = np.array([])
     best_val_acc = np.array([])
 
